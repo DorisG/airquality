@@ -1,0 +1,548 @@
+---
+title: "Capstone with Airquality Data"
+author: "Min Gong"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: false
+    toc_depth: 5
+    highlight: textmate
+    theme: journal
+    number_sections: true
+  pdf_document:
+    toc: true
+    toc_depth: '5'
+editor_options:
+  chunk_output_type: console
+---  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("tidyverse")
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(skimr)
+library(stringr)
+library(patchwork)
+library(magrittr)
+library(rlang)
+```
+
+
+# Problem 1: Importing and exploring data
+## P1.1. Rename Data set
+-   Get a local copy of the dataset "airquality" and name it "df" so that you can use it. 
+```{r rename data}
+#rename the dataset
+df <- airquality
+head(df)
+```
+
+-   Identify data type, change it to tibble data type, and make a change to the pdf.
+```{r check data type and make tibble}
+typeof(df)
+class(df)
+
+#convert to tibble and save it as df
+df <- as_tibble(df)
+```
+
+-   Confirm the data type is tibble by printing df out.
+```{r check data type after tibble}
+print(df)
+class(df)
+```
+
+
+## P1.2. Variable Definition and Background of the Topic
+-   Look up the help to understand the definition of the variables. 
+```{r understand data}
+help("airquality")
+```
+
+-   In addition, look up Ozone and related variables on the internet. A quick search on Ozone leads me to https://www.epa.gov/ozone-pollution-and-your-patients-health/what-ozone. Read a bit to gain domain knowledge, which is needed to analyze the data. It appears that Southern California has the highest concentration of Ozone.  
+-   Given the definition of the data and the knowledge you gained from your research, what would you think are potential dependent variables and independent variables? Can you form a hypothesis regarding the relationships among the variables?    
+
+It seems reasonable to treat Ozone as a dependent variable and the Solar.R, Wind, and Temp as independent variables. Also, the Ozone amount may be dependent on the Month, such that Ozone amount is highest during hottest months.
+
+Thus, I would form hypotheses as follows.
+
+H1: Ozone amount will be associated positively with Solar radiation amount (Solar.R)  
+H2: Ozone amount will be associated negatively with Wind speed (Wind)  
+H3: Ozone amount will be associated positively with Maximum daily temperature (Temp)  
+H4: Ozone amount will be highest during summer months.     
+
+-   **Answer to this question**:  
+*Definition of data*: airquality is a daily air quality measurements in New York, from May to September in 1973.   
+It contains 153 observations on 6 variables:   
+  + Ozone: Ozone concentration (parts per billion)  
+  + Solar.R: Solar radiation (lang)  
+  + Wind: Wind speed (mph)  
+  + Temp: Temperature (degrees Fahrenheit)  
+  + Month: Month of observation (1 = January, 2 = February, etc.)  
+  + Day: Day of observation (1--31)  
+*Dependent Variable*: Ozone  
+*Independent variables*: Solar.R, Wind, Temp  
+Hypothesis 1: Higher solar radiation levels lead to higher ozone concentrations.  
+Hypothesis 2: Higher temperatures lead to higher ozone concentrations.    
+Hypothesis 3: Wind speed negatively affects ozone concentration.  
+Hypothesis 4: Ozone concentrations vary by month.  
+
+
+## P1.3. View data
+-   Next, show the first 7 rows of it. Pay attention to the names of the variables. 
+```{r view head 7 rows}
+head(df, n = 7L)
+#colnames(df)
+```
+
+-   Look for unique values of categorical values (i.e., Month and Day variables). What did you find? Do you feel you should change the data type of the two variables? Why or why not?  
+```{r unique cat}
+unique(df$Month) #Month could be converted to character/factor for further analysis and visualization as categorical values.
+unique(df$Day) #Day could remain as numeric since most of the analyses is within each month 
+```
+
+* A change of calculation(sum/mean/min/max) for the variables Month and Day to get a monthly data, it would help with analysis the data better.
+```{r statistics calculation}
+#calculation(sum/mean/min/max) 
+df_stats <- df %>%
+  group_by(Month) %>%
+  summarise(across(c(Ozone, Solar.R, Wind, Temp), 
+                   list(sum = ~sum(.x, na.rm = TRUE),
+                        mean = ~mean(.x, na.rm = TRUE),
+                        min = ~min(.x, na.rm = TRUE),
+                        max = ~max(.x, na.rm = TRUE)),
+                   .names = "{col}_{fn}"))
+print(df_stats)
+
+
+#tidy data
+df_stats_long <- df_stats %>% 
+  pivot_longer(cols = -Month,
+               names_to = c("Variable", "Statistics"),
+               names_sep = "_",
+               values_to = "Value") %>%
+  pivot_wider(names_from = "Statistics", 
+              values_from = "Value")
+
+df_stats_long
+
+```
+
+-   There are only five months in the data while there are 31 days. For now, let's change the month data type from a number to a factor. 
+```{r convert month to factor}
+df <- df %>% 
+  mutate(Month = factor(Month, levels = 5:9, 
+                        labels = c("May", "Jun", "Jul", "Aug", "Sep")))  
+head(df)
+tail(df)
+is.factor(df$Month)
+```
+
+-   Write a code that reveals how many variables and observations are in the data set. 
+```{r dimension}
+#show variables and observations dimensions:
+dim(df)
+print(glue::glue("There are {ncol(df)} variables and {nrow(df)} observations in the airquality dataset."))
+```
+
+## P1.4. Simple Descriptive statistics
+-  Also, write code that gives you some basic descriptive statistics. You will notice that two variables have missing values. 
+```{r summary}
+summary(df) #Ozone and Solar.R have missing values.
+```
+
+-   Use the glimpse() function from dplyr package and skim() function from skimr package to understand the data. Skim function shows mean, sd, percentiles, and histogram. 
+```{r skim}
+glimpse(df)
+skimr::skim(df)
+```
+
+-   Looking at the histogram, which variable is most skewed?   
+The histograms shows that Ozone is the most skewed variable.  
+**Hint**. you may need to use skimr::skim() to make the skim function work.  
+
+
+# Problem 2: Visualize numerical variables
+## P2.1. Histograms
+-   Visualize numerical data with a histogram. Normality assumption is important when running a regression. If the data is severely skewed, change to a log-based scale to depict the variable on the chart.
+```{r histogram}
+#create a function to plot histogram
+histogram <- function(data, var) {
+  library(ggplot2); library(magrittr); library(rlang)
+  theme_set(theme_bw())
+  
+  plot <- ggplot(data, aes(x = .data[[var]])) +
+    geom_histogram(color = "white", fill = "lightpink",
+                   binwidth = function(x) 2 * IQR(x)/
+                     length(x)^(1/3))
+  return(plot)
+}
+
+# extract only numerical valuables
+airquality_num <- df %>% select(Ozone:Temp)
+
+# plot histograms
+histograms <- 
+map2(.x = list(airquality_num), 
+     .y = names(airquality_num), 
+     .f = histogram)
+
+histograms
+
+#combine all plots together
+wrap_plots(histograms) +
+  plot_layout(nrow = length(histograms))
+
+
+```
+
+## P2.2. Ozone by Continuous variables
+- Now, let's examine the relationship between each continuous variable and Ozone at one pair at a time. Which plot should you use and why? Also, add a regression line on the plot.   
+Choice of Plot: Scatter plots are chosen because they visually represent the relationship between two continuous variables effectively. They allow you to see patterns, correlations, and potential outliers.
+```{r ozone vs. continuous var}
+#create a function to draw Ozone with different continuous variables
+plot_Ozone_continuous <- function(data, var) {
+  library(ggplot2)
+  library(stringr)
+  
+  plot <- df %>% 
+    filter(!is.na(Ozone), !is.na(.data[[var]])) %>%
+    ggplot(aes(x = .data[[var]], y = Ozone)) +
+    geom_point(size = 3) +
+    geom_smooth(formula = 'y ~ x', method = "lm", 
+              se = FALSE, color = "red") +
+    labs(title = paste(var, "vs Ozone"),
+         x = var,
+         y = "Ozone") +
+    theme_minimal()
+  return(plot)
+}
+
+#Solar.R vs. Ozone
+plot_Ozone_continuous(df, "Solar.R")
+
+#Wind vs. Ozone
+plot_Ozone_continuous(df, "Wind")
+
+#Temp vs. Ozone
+plot_Ozone_continuous(df, "Temp")
+
+
+
+
+
+```
+
+## P2.3. Ozone by Month (Monthly ozone amount)
+- This time, draw a chart showing the impact of the categorical independent variables on the ozone amount.
+```{r ozone by month}
+df %>%
+  filter(!is.na(Ozone)) %>% 
+  group_by(Month) %>% 
+  summarise(count = sum(Ozone))%>% 
+  ggplot(aes(x = Month, y = count)) +
+  geom_col() +
+  labs(title = "Monthly Ozone Amount",
+       x = "") +
+  theme_minimal()
+
+
+df %>%
+  filter(!is.na(Ozone)) %>% 
+  ggplot(aes(x = Month, y = Ozone)) +
+  geom_boxplot(fill = "yellow") +
+  labs(title = "Box Plot of Ozone by Month",
+       x = "",
+       y = "Ozone") +
+  theme_minimal()
+```
+
+# Problem 3: The moderating role of the Month?
+## P3.1. Using group_by() and summarise(), find out how many cases exist for each month.
+```{r monthly cases}
+df %>% 
+  group_by(Month) %>% 
+  summarise(case = n())
+```
+
+## P3.2. Draw a series of charts showing the impact of Solar.R on Ozone cut by Month.
+```{r ozone vs. continuous var by month}
+#create a function to draw different variables' impact on Ozone cut by month 
+plot_Ozone_continuous_monthly <- function(data, var) {
+  library(ggplot2)
+  library(stringr)
+  theme_set(theme_bw())
+  
+  plot <- ggplot(df, aes(x = .data[[var]], y = Ozone, color = Month)) +
+    geom_point(show.legend = FALSE) +
+    geom_smooth(color = "red", formula = 'y ~ x', 
+                method = "lm", se = FALSE) +
+    facet_wrap(~Month) +
+    labs(title = paste(var, "impacts Ozone by month"),
+         x = var,
+         y = "Ozone")
+  return(plot)
+}
+
+#apply function with Solar.R
+plot_Ozone_continuous_monthly(df, "Solar.R")
+  
+```
+
+## P3.3. Draw a series of charts showing the impact of Wind on Ozone cut by Month.
+```{r Ozone vs. Wind by month}
+plot_Ozone_continuous_monthly(df, "Wind")
+```
+
+## P3.4. Draw a series of charts showing the impact of Temp on Ozone cut by Month.
+```{r Ozone vs. Temp by month}
+plot_Ozone_continuous_monthly(df, "Temp")
+
+```
+
+## P3.5  Based on the descriptive statistics above, can you conclude that the impact of Solar.R and Wind on Ozone changes by Month?
+- Solar.R impact: Each month's plot shows a trend where Ozone increases with Solar.R, indicating that more solar radiation contributes to higher ozone levels.    
+- Wind impact: Wind appears to have a more complex and less direct impact on ozone levels. High wind speeds might reduce Ozone concentrations by dispersing pollutants, but this effect can vary depending on other atmospheric conditions.   
+
+
+# Problem 4: Correlations
+## P4.1.  The data visualization so far should have helped you form associations among the variables. Now, let's try to quantify the associations by running correlations among all numeric variables.
+```{r cor}
+df %>% select(Ozone:Temp) %>% cor(use = "pairwise.complete.obs")
+```
+
+## P4.2.  Which variables are correlated highly with Ozone? Describe the nature of the association -- whether the association is positive or negative, strongly or weakly correlated.
+- Strongly Positive Correlation: Ozone has strongly positive correlation with Temperature (Temp), as temperature increases, Ozone tends to increase as well.   
+
+- Strongly Negative Correlation: Ozone has strongly negative correlation with Wind speed, indicating that higher wind speeds are associated with lower Ozone levels.    
+
+- Moderate Positive Correlation: Ozone seems to have moderate positive correlation with Solar Radiation (Solar.R), suggesting that higher solar radiation levels are associated with higher Ozone levels.    
+
+- Weak Correlation: There is a very weak correlation between the Day of the month and Ozone, indicating that the day of the month does not significantly influence Ozone in this dataset.   
+
+# Problem 5: Examine Missing values
+When you ran simple descriptive statistics previously, you would have noticed that two variables had missing values, which might have given you some trouble while you visualized the data.
+
+Write the codes that tell you 
+(1)where the missing values are located, 
+```{r na location}
+df %>% is.na()
+# which()
+```
+
+(2) the number of missing values in the dataset (df), 
+```{r n of na}
+df %>% summarise_all(~sum(is.na(.))) 
+```
+
+(3) the number of missing values in the Solar.R column, and 
+```{r solar.r na}
+df %>% select(Solar.R) %>%  
+  filter(is.na(Solar.R)) %>% count()
+
+#or 
+df %>% summarise_all(~sum(is.na(.))) %>% select(Solar.R)
+
+#or
+sum(is.na(df['Solar.R']))
+```
+
+(4) all the rows that include at least one missing value.
+```{r nrow of na}
+df_na <- df %>% filter(if_any(everything(), is.na))
+
+df_na
+```
+
+(5) Lastly, write the code that returns the number of rows with at least one missing value. Hint: some rows have more than one missing value.
+```{r numbers of na}
+nrow(df_na)
+```
+
+# Problem 6: Missing value imputation
+(1) Replace all the missing values in the Solar.R column with the median of the values in the column. 
+```{r solar.r median}
+
+Solar_median<- df %>% 
+  filter(!is.na(Solar.R)) %>% 
+  summarise(Solar_median = median(Solar.R))
+print(Solar_median)
+
+df['Solar.R'][is.na(df['Solar.R'])] <- as.integer(Solar_median)
+df
+```
+
+(2) Replace all the missing values in the Ozone column with the median of the values in the column.
+```{r ozone median}
+Ozone_median<- df %>% 
+  filter(!is.na(Ozone)) %>% 
+  summarise(Ozone_median = median(Ozone))
+print(Ozone_median)
+
+df['Ozone'][is.na(df['Ozone'])] <- as.integer(Ozone_median)
+df
+```
+
+(3) Take a look at the descriptive statistics again.
+```{r summary after replacing na}
+summary(df)
+```
+
+(4) Also, get the mean and standard deviation of all continuous variables.
+```{r mean and sd}
+df %>% 
+  summarize(across(c(Ozone:Temp), 
+                   list(Mean = mean, SD = sd),
+                   .names = "{.col}_{.fn}")
+            )
+```
+
+# Problem 7: Correlations after missing value imputation
+## P7.1. Correlation with raw Ozone
+- Run the correlation analysis you did in Problem 4 again.
+```{r cor after inputing na}
+df %>% select(Ozone:Temp) %>% cor(use = "pairwise.complete.obs")
+```
+
+-  Compare the results of the correlations before and after missing value imputations. What can you tell about the strength of the association between Ozone and the other three variables?    
+Filling in the missing values in the dataset slightly affected the relationships involving Ozone. The connection between Ozone and Solar.R, and between Ozone and Temp, became a bit weaker. However, the strong negative relationship between Ozone and Wind stayed the same.    
+
+## P7.2. Correlations with Logged Ozone
+- This time, create a new variable by taking the log of Ozone -- log(Ozone) -- as Ozone is severely skewed. Write the code to repeat (1) with the log-transformed form of Ozone.
+```{r ozone_logged cor}
+df %>% 
+  mutate(Ozone_logged = log(Ozone)) %>% 
+  select(-Month, -Day) %>% 
+  cor(use = "pairwise.complete.obs")
+```
+
+- What can you tell about the strength of association between the transformed Ozone and the other three variables? Do you see a pattern of relationships that differ in the two sets of correlations? Why do you think there were discrepancies?  
+
+The log transformation of Ozone made its correlation with Solar.R and Temp stronger and clearer by normalizing the data and reducing the effect of outliers. It also slightly weakened the negative correlation with Wind. Raw Ozone correlations were less reliable due to data skewness, which hid stronger positive relationships with Solar.R and Temp. Imputing missing values had a minor effect, slightly lowering the correlations with Solar.R and Temp but keeping the strong negative correlation with Wind stable. This highlights the importance of handling missing data and transforming skewed variables for better correlation results.  
+
+# Problem 8: Adding a new variable to the data sets and adjusting data types
+(1) Since the logged Ozone variable seems to be helpful, let's add the variable. 
+(2) Look for the unique value of the Month variable. Since Month is categorical data, change it to a factor data type in preparation for visualization
+(3) Also, change the data type to tibble permanently.
+(4) Confirm that the changes you made are successful by printing out the data sets.
+```{r ozone_logged}
+
+#add log(Ozone) to df
+df<- df %>% 
+  mutate(Ozone_logged = log(Ozone))
+df
+
+#convert Month to factor
+df$Month <- factor(df$Month)
+class(df$Month)
+
+#convert df to tibble 
+df <- as_tibble(df)
+class(df)
+df
+```
+
+# Problem 9: Data Visualization using imputed data
+Let's repeat the visualization you did in Problem 2 and Problem 3, using the imputed data and Log-transformed Ozone variable. Specifically, do the following data visualizations. 
+
+## P9.1.  Histogram of Ozone, Ozone_logged, and Solar.R
+```{r histogram ozone_logged}
+# plot histograms using function created in P2
+df_p9 <- df %>% select(Ozone, Ozone_logged, Solar.R)
+
+histograms_p9 <- 
+map2(.x = list(df_p9), 
+     .y = names(df_p9), 
+     .f = histogram)
+
+histograms_p9
+
+#combine all plots together
+wrap_plots(histograms_p9) +
+  plot_layout(nrow = length(histograms_p9))
+
+
+```
+
+## P9.2.  Ozone by Continuous variables
+```{r}
+#using function created in p2.2
+#Solar.R vs. Ozone
+plot_Ozone_continuous(df, "Solar.R")
+
+#Wind vs. Ozone
+plot_Ozone_continuous(df, "Wind")
+
+#Temp vs. Ozone
+plot_Ozone_continuous(df, "Temp")
+
+```
+
+-   ## P9.3.  Ozone by Month
+```{r}
+df %>%
+  ggplot(aes(x = Month, y = Ozone)) +
+  geom_boxplot(fill = "yellow") +
+  labs(title = "Box Plot of Ozone by Month",
+       x = "",
+       y = "Ozone") +
+  theme_minimal()
+```
+
+-   ## P9.4.  Moderating Role of Month in the impact of Continuous variables on Ozone
+```{r}
+#using function created in 3.2
+#Solar.R impacts on Ozone
+plot_Ozone_continuous_monthly(df, "Solar.R")
+#Wind impacts on Ozone
+plot_Ozone_continuous_monthly(df, "Wind")
+#Temp impacts on Ozone
+plot_Ozone_continuous_monthly(df, "Temp")
+
+```
+
+-   ## P9.5: Do you find the same relationships as before?
+Yes, most of the impacts show on the plots for each month remain the same as before, except for June. The denser alignment of points and the smoother fit line for June indicate that imputation had a significant effect on the data distribution for that month. This suggests that the missing values in June were numerous and replacing them with summary statistics of median altered the overall distribution of the data.
+
+# Problem 10: Using categorical Ozone amount
+## P10.1: categorical Ozone
+Create a new column called "Ozone_cat." If the Ozone of the imputed dataset is less than or equal to the 25th quantile of the Ozone amount in the data, put “Low” in the new column, if it is greater than 25th quantile and less than the 75th quantile, put "Middle," and if it is greater than 75th quantile, put “high” in the new column (use the pipe operator).  
+
+**Hint**: You may use quantile() to find 25th and 75 quantile. You may also use case_when() from dplr.
+```{r ozone_cat}
+quantile(df$Ozone)
+df <- df %>% 
+  mutate(Ozone_cat = case_when(Ozone <= 21 ~ "Low",
+                               Ozone > 21 & Ozone <75 ~ "Middle",
+                               Ozone > 75 ~ "High",
+                               .default = as.character(Ozone)))
+df
+```
+
+## P10.2: Monthly Ozone Severity
+Now that you have created Ozone_cat, which is a factor, let's draw a chart that shows monthly counts of each of the three levels of Ozone_cat -- Low, Middle, and High in that order. Make the chart as professional as it can be.
+
+Hints: When you created the Ozone_cat variable previously, you might have created the level differently than the low-middle-high order. If so, you can change the order of the level using a combination of mutate and fct_relevel() and manually type the order you like: "c("Low", "Middle", "High")". To generate the count of Ozone_cat, you would like to use "group_by()" and "count()."
+```{r}
+df %>%
+  mutate(Ozone_cat = fct_relevel(Ozone_cat, 
+                                 c("Low", "Middle", "High")))%>% 
+  group_by(Month, Ozone_cat) %>% 
+  count() %>% 
+  ggplot(aes(x = Month, y = n, fill = Month)) +
+  geom_col(position = "dodge", show.legend = FALSE) +
+  facet_wrap(~Ozone_cat) +
+  labs(title = "Monthly Count of Ozone Category",
+       x = "",
+       y = "Count") 
+
+```
+
+## P10.3: Insights from the chart  
+- What can you tell about the monthly Ozone severity?      
+  + The severity of ozone levels varies from month to month. May and September consistently have the lowest ozone levels, indicating cleaner air during these months. On the other hand, July and August consistently have the highest ozone levels, suggesting more pollution during the peak summer months. This matches Hypothesis 4, which suggests that ozone levels change with the seasons. Solar radiation and temperature have a notable impact on ozone levels, contributing to higher concentrations in July and August. In contrast, wind speed shows a negative relationship with ozone levels, meaning lower wind speeds may contribute to higher ozone concentrations, especially noticeable in July and August. These findings support Hypotheses 1, 2, and 3, which focus on the effects of sunlight, temperature, and wind on ozone concentrations throughout the year.  
+
